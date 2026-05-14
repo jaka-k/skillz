@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as p from '@clack/prompts';
+import { homedir } from 'os';
 import { REPOS, fetchSkills } from './lib/skills.js';
 import { assertGh, installSkill } from './lib/install.js';
 import { detectStructure, scaffold } from './lib/detect.js';
@@ -11,41 +12,74 @@ async function main() {
 
   assertGh();
 
-  const cwd = process.cwd();
-
-  // ── Step 1: project setup ────────────────────────────────────────────────
-  const mode = await p.select({
-    message: 'How are you setting up?',
+  // ── Step 1: scope ────────────────────────────────────────────────────────
+  const scope = await p.select({
+    message: 'Where do you want to install skills?',
     options: [
-      { value: 'scratch',  label: 'Starting from scratch', hint: 'creates .agents/ and AGENTS.md' },
-      { value: 'existing', label: 'Existing project',      hint: 'detects .claude/ and .agents/ structure' },
+      { value: 'local',  label: 'Local',  hint: 'current project — .agents/ and AGENTS.md' },
+      { value: 'global', label: 'Global', hint: 'available across all projects' },
     ],
   });
-  if (p.isCancel(mode)) { p.cancel(); process.exit(0); }
+  if (p.isCancel(scope)) { p.cancel(); process.exit(0); }
 
-  if (mode === 'scratch') {
-    const { createdDir, createdMd } = scaffold(cwd);
-    if (createdDir) p.log.success('Created .agents/');
-    else            p.log.warn('.agents/ already exists, skipping');
-    if (createdMd)  p.log.success('Created AGENTS.md');
-    else            p.log.warn('AGENTS.md already exists, skipping');
-  } else {
-    const { dirs, files } = detectStructure(cwd);
-    if (dirs.length === 0 && files.length === 0) {
-      p.log.warn('Nothing detected — no .claude/, .agents/, AGENTS.md or CLAUDE.md found');
+  const ghScope = scope === 'local' ? 'project' : 'user';
+
+  let targetDir;
+
+  if (scope === 'local') {
+    targetDir = process.cwd();
+
+    const mode = await p.select({
+      message: 'How are you setting up?',
+      options: [
+        { value: 'scratch',  label: 'Starting from scratch', hint: 'creates .agents/ and AGENTS.md' },
+        { value: 'existing', label: 'Existing project',      hint: 'detects .claude/ and .agents/ structure' },
+      ],
+    });
+    if (p.isCancel(mode)) { p.cancel(); process.exit(0); }
+
+    if (mode === 'scratch') {
+      const { createdDir, createdMd } = scaffold(targetDir);
+      if (createdDir) p.log.success('Created .agents/');
+      else            p.log.warn('.agents/ already exists, skipping');
+      if (createdMd)  p.log.success('Created AGENTS.md');
+      else            p.log.warn('AGENTS.md already exists, skipping');
     } else {
-      if (dirs.length)  p.log.info(`Directories: ${dirs.map(d => `${d}/`).join('  ')}`);
-      if (files.length) p.log.info(`Files:       ${files.join('  ')}`);
+      const { dirs, files } = detectStructure(targetDir);
+      if (dirs.length === 0 && files.length === 0) {
+        p.log.warn('Nothing detected — no .claude/, .agents/, AGENTS.md or CLAUDE.md found');
+      } else {
+        if (dirs.length)  p.log.info(`Directories: ${dirs.map(d => `${d}/`).join('  ')}`);
+        if (files.length) p.log.info(`Files:       ${files.join('  ')}`);
+      }
     }
+  } else {
+    const target = await p.select({
+      message: 'Installation target',
+      options: [
+        { value: 'generic', label: 'Generic', hint: '~/.agents/ and ~/AGENTS.md' },
+        { value: 'vendor',  label: 'Vendor',  hint: '.claude/ and others — coming soon', disabled: true },
+      ],
+    });
+    if (p.isCancel(target)) { p.cancel(); process.exit(0); }
+
+    targetDir = homedir();
+    const { createdDir, createdMd } = scaffold(targetDir);
+    if (createdDir) p.log.success(`Created ${targetDir}/.agents/`);
+    else            p.log.info(`${targetDir}/.agents/ already exists`);
+    if (createdMd)  p.log.success(`Created ${targetDir}/AGENTS.md`);
+    else            p.log.info(`${targetDir}/AGENTS.md already exists`);
   }
 
-  // ── Step 2: fetch available skills ──────────────────────────────────────
+  // ── Step 2: fetch available skills ───────────────────────────────────────
   const fetchSpinner = p.spinner();
   fetchSpinner.start('Fetching available skills...');
   let addyOptions, mattOptions;
   try {
-    addyOptions = fetchSkills(REPOS.addy);
-    mattOptions = fetchSkills(REPOS.matt);
+    [addyOptions, mattOptions] = await Promise.all([
+      fetchSkills(REPOS.addy),
+      fetchSkills(REPOS.matt),
+    ]);
     fetchSpinner.stop(`Fetched ${addyOptions.length + mattOptions.length} skills`);
   } catch (err) {
     fetchSpinner.stop('Failed to fetch skills');
@@ -53,7 +87,7 @@ async function main() {
     process.exit(1);
   }
 
-  // ── Step 3: packages or manual ──────────────────────────────────────────
+  // ── Step 3: packages or manual ───────────────────────────────────────────
   const selectionMode = await p.select({
     message: 'How do you want to pick skills?',
     options: [
@@ -132,18 +166,18 @@ async function main() {
 
   for (const skill of addyToInstall) {
     installSpinner.start(`Installing ${skill.value}`);
-    installSkill(REPOS.addy, skill.value);
-    installSpinner.stop(`Installed ${skill.value}`);
+    const r1 = installSkill(REPOS.addy, skill.value, { scope: ghScope });
+    installSpinner.stop(r1 === 'already-installed' ? `Already installed ${skill.value}` : `Installed ${skill.value}`);
   }
 
   for (const skill of mattToInstall) {
     installSpinner.start(`Installing ${skill.value}`);
-    installSkill(REPOS.matt, skill.value);
-    installSpinner.stop(`Installed ${skill.value}`);
+    const r2 = installSkill(REPOS.matt, skill.value, { scope: ghScope });
+    installSpinner.stop(r2 === 'already-installed' ? `Already installed ${skill.value}` : `Installed ${skill.value}`);
   }
 
   if (injectMd) {
-    appendAgentsMd(cwd, addyToInstall, mattToInstall);
+    appendAgentsMd(targetDir, addyToInstall, mattToInstall);
     p.log.success('Appended skills block to AGENTS.md');
   }
 

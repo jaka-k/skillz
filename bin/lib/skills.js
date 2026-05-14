@@ -1,15 +1,18 @@
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export const REPOS = {
   addy: 'addyosmani/agent-skills',
   matt: 'mattpocock/skills',
 };
 
-export function fetchSkills(repo) {
+export async function fetchSkills(repo) {
   const author = repo.split('/')[0];
-  const raw = execSync(`gh skill search ${author}`, { encoding: 'utf8' });
+  const { stdout } = await execAsync(`gh skill search ${author}`);
 
-  return raw.trim().split('\n')
+  return stdout.trim().split('\n')
     .filter(line => line.startsWith(`${repo}\t`))
     .map(line => {
       const parts = line.split('\t');
