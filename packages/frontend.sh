@@ -45,3 +45,6 @@ done
 
 echo ""
 echo "Done. $(( ${#ADDY_SKILLS[@]} + ${#MATT_SKILLS[@]} )) skills installed."
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/inject-agents-md.sh" "${1:-.}"
