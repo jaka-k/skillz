@@ -4,6 +4,7 @@ import { REPOS, fetchSkills } from './lib/skills.js';
 import { assertGh, installSkill } from './lib/install.js';
 import { detectStructure, scaffold } from './lib/detect.js';
 import { appendAgentsMd } from './lib/agents-md.js';
+import { PACKAGES, checkAvailability, resolvePackageSkills } from './lib/packages.js';
 
 async function main() {
   p.intro('@jaka-k/skillz');
@@ -12,6 +13,7 @@ async function main() {
 
   const cwd = process.cwd();
 
+  // ── Step 1: project setup ────────────────────────────────────────────────
   const mode = await p.select({
     message: 'How are you setting up?',
     options: [
@@ -37,63 +39,111 @@ async function main() {
     }
   }
 
-  const spinner = p.spinner();
-  spinner.start('Fetching available skills...');
+  // ── Step 2: fetch available skills ──────────────────────────────────────
+  const fetchSpinner = p.spinner();
+  fetchSpinner.start('Fetching available skills...');
   let addyOptions, mattOptions;
   try {
     addyOptions = fetchSkills(REPOS.addy);
     mattOptions = fetchSkills(REPOS.matt);
-    spinner.stop(`Fetched ${addyOptions.length + mattOptions.length} skills`);
+    fetchSpinner.stop(`Fetched ${addyOptions.length + mattOptions.length} skills`);
   } catch (err) {
-    spinner.stop('Failed to fetch skills');
+    fetchSpinner.stop('Failed to fetch skills');
     p.cancel(err.message);
     process.exit(1);
   }
 
-  const addySelected = await p.multiselect({
-    message: 'Addy Osmani — addyosmani/agent-skills',
-    options: addyOptions,
-    required: false,
+  // ── Step 3: packages or manual ──────────────────────────────────────────
+  const selectionMode = await p.select({
+    message: 'How do you want to pick skills?',
+    options: [
+      { value: 'packages', label: 'Install a package',  hint: 'curated combos for common setups' },
+      { value: 'manual',   label: 'Manual selection',   hint: 'pick individual skills from both repos' },
+    ],
   });
-  if (p.isCancel(addySelected)) { p.cancel(); process.exit(0); }
+  if (p.isCancel(selectionMode)) { p.cancel(); process.exit(0); }
 
-  const mattSelected = await p.multiselect({
-    message: 'Matt Pocock — mattpocock/skills',
-    options: mattOptions,
-    required: false,
-  });
-  if (p.isCancel(mattSelected)) { p.cancel(); process.exit(0); }
+  let addyToInstall = [];
+  let mattToInstall = [];
 
-  const total = addySelected.length + mattSelected.length;
+  if (selectionMode === 'packages') {
+    const packageOptions = PACKAGES.map(pkg => {
+      const { total, found, ok } = checkAvailability(pkg, addyOptions, mattOptions);
+      const status = ok ? '✓' : `⚠ ${found}/${total}`;
+      return {
+        value: pkg.value,
+        label: `${status}  ${pkg.label}`,
+        hint: pkg.description,
+      };
+    });
+
+    const selectedPackages = await p.multiselect({
+      message: 'Select packages to install',
+      options: packageOptions,
+      required: true,
+    });
+    if (p.isCancel(selectedPackages)) { p.cancel(); process.exit(0); }
+
+    const seen = new Set();
+    for (const pkgValue of selectedPackages) {
+      const pkg = PACKAGES.find(p => p.value === pkgValue);
+      const { addy, matt } = resolvePackageSkills(pkg, addyOptions, mattOptions);
+      for (const s of addy) {
+        if (!seen.has(s.value)) { addyToInstall.push(s); seen.add(s.value); }
+      }
+      for (const s of matt) {
+        if (!seen.has(s.value)) { mattToInstall.push(s); seen.add(s.value); }
+      }
+    }
+  } else {
+    const addySelected = await p.multiselect({
+      message: 'Addy Osmani — addyosmani/agent-skills',
+      options: addyOptions,
+      required: false,
+    });
+    if (p.isCancel(addySelected)) { p.cancel(); process.exit(0); }
+
+    const mattSelected = await p.multiselect({
+      message: 'Matt Pocock — mattpocock/skills',
+      options: mattOptions,
+      required: false,
+    });
+    if (p.isCancel(mattSelected)) { p.cancel(); process.exit(0); }
+
+    addyToInstall = addySelected.map(v => addyOptions.find(s => s.value === v));
+    mattToInstall = mattSelected.map(v => mattOptions.find(s => s.value === v));
+  }
+
+  const total = addyToInstall.length + mattToInstall.length;
   if (total === 0) {
     p.outro('No skills selected. Nothing to install.');
     process.exit(0);
   }
 
+  // ── Step 4: inject AGENTS.md ─────────────────────────────────────────────
   const injectMd = await p.confirm({
     message: 'Append skills block to AGENTS.md?',
     initialValue: true,
   });
   if (p.isCancel(injectMd)) { p.cancel(); process.exit(0); }
 
+  // ── Step 5: install ──────────────────────────────────────────────────────
   const installSpinner = p.spinner();
 
-  for (const value of addySelected) {
-    installSpinner.start(`Installing ${value}`);
-    installSkill(REPOS.addy, value);
-    installSpinner.stop(`Installed ${value}`);
+  for (const skill of addyToInstall) {
+    installSpinner.start(`Installing ${skill.value}`);
+    installSkill(REPOS.addy, skill.value);
+    installSpinner.stop(`Installed ${skill.value}`);
   }
 
-  for (const value of mattSelected) {
-    installSpinner.start(`Installing ${value}`);
-    installSkill(REPOS.matt, value);
-    installSpinner.stop(`Installed ${value}`);
+  for (const skill of mattToInstall) {
+    installSpinner.start(`Installing ${skill.value}`);
+    installSkill(REPOS.matt, skill.value);
+    installSpinner.stop(`Installed ${skill.value}`);
   }
 
   if (injectMd) {
-    const addy = addySelected.map(v => addyOptions.find(s => s.value === v));
-    const matt = mattSelected.map(v => mattOptions.find(s => s.value === v));
-    appendAgentsMd(cwd, addy, matt);
+    appendAgentsMd(cwd, addyToInstall, mattToInstall);
     p.log.success('Appended skills block to AGENTS.md');
   }
 

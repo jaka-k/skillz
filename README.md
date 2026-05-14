@@ -9,18 +9,27 @@ Interactive CLI to install curated [Claude Code](https://claude.ai/code) agent s
 
 ## Usage
 
-Run directly with npx — no install needed:
-
 ```bash
 npx @jaka-k/skillz
 ```
 
 The CLI will:
 
-1. Present a multi-select list of Addy Osmani's skills
-2. Present a multi-select list of Matt Pocock's skills
-3. Run `gh skill install` for each selection
-4. Optionally append a skills usage block to `AGENTS.md` in the current directory
+1. Ask whether you're starting from scratch or working in an existing project
+2. Fetch the live skill catalogue from both repos via `gh skill search`
+3. Ask whether you want a preset package or manual selection
+4. Run `gh skill install` for each selected skill
+5. Optionally append a skills block to `AGENTS.md` in the current directory
+
+## Packages
+
+Preset combos for common setups. Each shows a live `✓` / `⚠` based on what's currently available in the upstream repos.
+
+| Package | Skills |
+|---|---|
+| **Frontend** | `frontend-ui-engineering`, `performance-optimization`, `code-review-and-quality`, `engineering/tdd`, `misc/setup-pre-commit` |
+| **Backend** | `api-and-interface-design`, `security-and-hardening`, `ci-cd-and-automation`, `code-review-and-quality`, `engineering/tdd`, `engineering/diagnose` |
+| **Code Design** | `spec-driven-development`, `documentation-and-adrs`, `doubt-driven-development`, `idea-refine`, `engineering/to-prd`, `engineering/prototype` |
 
 ## Available skills
 
@@ -58,19 +67,3 @@ The CLI will:
 | `misc/setup-pre-commit` | Husky / lint-staged / type-checking on commit is missing |
 | `misc/scaffold-exercises` | Set up a new course section with problems and solutions |
 | `misc/migrate-to-shoehorn` | Replace `as` type assertions in tests with shoehorn |
-
-## Scripts
-
-The `packages/` and `main/` directories contain standalone bash scripts if you prefer not to use the interactive CLI.
-
-```bash
-# Install a preset frontend skill bundle
-./packages/frontend.sh
-
-# Append skills usage block to AGENTS.md
-./packages/inject-agents-md.sh [target-dir]
-
-# Install all skills from a single author
-./main/addy-osmani.sh [target-dir]
-./main/matt-pocock.sh [target-dir]
-```
